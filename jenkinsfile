@@ -1,0 +1,89 @@
+echo 'Pipeline is starting...'
+import java.text.SimpleDateFormat
+node {
+
+  stage ('Checkout') {
+   checkout scm
+ }
+
+ timestamps {
+   try {
+     stage ('Build') {
+echo 'Build is starting...'
+       currentBuild.result = "SUCCESS"
+       def dateFormat = new SimpleDateFormat("ddMMyyyyHHmm")
+       def date = new Date()
+       env.staticVersion = dateFormat.format(date)
+       echo "static version detail : ${env.staticVersion}"
+       def envDetailArr = "${env.Environment_Detail}".split('_')
+       env.Envt = envDetailArr[0]
+       env.Deploy_Environment_Number = envDetailArr[1]
+       env.Server_IP = envDetailArr[2]
+
+       echo "Env Detail : ${Envt}"
+       echo "Deploy_Environment_Number : ${env.Deploy_Environment_Number}"
+   
+          withSonarQubeEnv('sonar') {
+echo 'Maven build is starting...'
+sh "mvn clean install -Pdw -Denv=qa -DstaticFileVersion=${env.staticVersion} -Dmaven.test.skip=true -Djs-tests.skip=true"
+//sh 'mvn sonar:sonar'
+}
+}
+        //stage("SonarQube Quality Gate") { 
+        //timeout(time: 1, unit: 'HOURS') {
+            //try{
+           //def qg = waitForQualityGate() 
+           //if (qg.status != 'OK') {
+            
+       
+            // error "Pipeline aborted due to quality gate failure: ${qg.status}"
+             
+           //}
+            //}catch(any){
+            //currentBuild.result='FAILURE'
+            //throw any
+           // }finally{
+            //step([$class: 'Mailer', notifyEveryUnstableBuild: true, recipients: 'avinash.aleti@ap.averydennison.com', sendToIndividuals: true])
+       // }
+        //}
+  // }
+     
+   stage ('Prepare_To_Deploy')
+       {
+           echo "Prepare_To_Deplo start ..."
+           Artifact = findFiles(glob: '**/DW-*-SNAPSHOT.tar')
+           env.ArtifactPath = Artifact[0].path
+           env.ArtifactName = Artifact[0].name
+           echo "Artifact ${ArtifactPath}"
+           echo "Artifact filename ${ArtifactName}"
+           sshagent(credentials : ['dwadmin_id']) {
+           //sh 'scp misc/continuous-integration/deploy.sh dwadmin@${Server_IP}:/home/dwadmin/'
+           sh "scp  ${ArtifactPath}  dwadmin@${Server_IP}:/home/dwadmin/"
+           sh 'ssh -o StrictHostKeyChecking=no -l dwadmin ${Server_IP} ls /home/dwadmin'
+           sh 'ssh -o StrictHostKeyChecking=no -l dwadmin ${Server_IP} pwd'
+         
+       }
+           
+       }
+       stage ('Deploy Code')
+       {
+         echo "Deploy Environment ${Envt} Number ${Deploy_Environment_Number}"
+         sh 'ssh -o StrictHostKeyChecking=no -l dwadmin ${Server_IP} ls /home/dwadmin'
+         sh 'cd /home/dwadmin'
+         sh 'pwd'
+         sh "ssh -o StrictHostKeyChecking=no -l dwadmin ${Server_IP} bash deploy.sh ${ArtifactName} ${Envt} ${Deploy_Environment_Number}"
+       }
+       
+
+     
+   }
+   catch(err) {
+     echo "ERROR: ${err}"
+     currentBuild.result = 'FAILURE'
+   }
+   finally {
+echo "BUILD RESULT: ${currentBuild.result}"
+step([$class: 'Mailer', notifyEveryUnstableBuild: true, recipients: 'avinash.aleti@ap.averydennison.com', sendToIndividuals: true])
+}
+ }
+}
